@@ -74,7 +74,8 @@ pub const BigDate = struct {
 
     /// Increment by one day, handling month and year turnovers
     /// Also handles leap years
-    pub fn increment(this: *Self) !void {
+    /// Should never fail
+    pub fn increment(this: *Self) void {
         if (std.meta.eql(this.lite_date, MAX_LITE_DATE)) {
             this.lite_date.year = 0;
             this.lite_date.month_day.month = .jan;
@@ -82,7 +83,7 @@ pub const BigDate = struct {
             this.year_rollover += 1;
             return;
         }
-        try this.lite_date.increment();
+        this.lite_date.increment() catch unreachable;
     }
 };
 
@@ -104,10 +105,20 @@ pub const Date = union(enum) {
 
     /// Increment by one day, handling month and year turnovers
     /// Also handles leap years
-    pub fn increment(this: *Self) !void {
-        switch (this.*) {
-            .lite_date => |*date| try date.increment(),
-            .big_date => |*date| try date.increment(),
+    pub fn increment(this: *Self) void {
+        ds: switch (this.*) {
+            .lite_date => |*date| {
+                date.increment() catch {
+                    this.* = Date{
+                        .big_date = .{
+                            .year_rollover = 0,
+                            .lite_date = date.*,
+                        },
+                    };
+                    continue :ds this.*;
+                };
+            },
+            .big_date => |*date| date.increment(),
         }
     }
 
@@ -150,7 +161,6 @@ pub const Date = union(enum) {
     }
 };
 
-
 /// Takes a date input in the form "mm/dd/yyyy" and returns a Date union.
 /// If year > 65535, a BigDate will be used.
 /// Otherwise, a LiteDate will be used.
@@ -165,9 +175,7 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
     defer date_breakdown.deinit();
     var it = std.mem.tokenizeScalar(u8, input, '/');
     while (it.next()) |date_frag| {
-        const parsed_date_frag: u64 = std.fmt.parseUnsigned(u64, date_frag, 10) catch |err| {
-            return err;
-        };
+        const parsed_date_frag: u64 = try std.fmt.parseUnsigned(u64, date_frag, 10);
         try date_breakdown.append(parsed_date_frag);
     }
     if (date_breakdown.items.len != 3) {
@@ -219,7 +227,7 @@ test "Date increment day" {
     try std.testing.expect(lite_date.year == 1950 and lite_date.month_day.month == .nov and lite_date.month_day.day_index == 10);
     var date: Date = .{ .lite_date = lite_date };
     print("[print_test] {f}\n", .{date});
-    try date.increment();
+    date.increment();
     print("[print_test] {f}\n", .{date});
 }
 test "Date increment 30 day month" {
@@ -394,13 +402,13 @@ test "Date rollover 2" {
     const allocator = std.testing.allocator;
     var parsed_date = try parseDate(allocator, "12/31/131071");
     parsed_date.dump();
-    try parsed_date.increment();
+    parsed_date.increment();
     parsed_date.dump();
 }
 test "Date rollover 3" {
     const allocator = std.testing.allocator;
-    var parsed_date = try parseDate(allocator, "12/31/65536");
+    var parsed_date = try parseDate(allocator, "12/31/65535");
     parsed_date.dump();
-    try parsed_date.increment();
+    parsed_date.increment();
     parsed_date.dump();
 }
