@@ -64,27 +64,7 @@ pub const Date = struct {
     pub fn isLeapYear(self: Self) bool {
         return self.year % 4 == 0 and (self.year % 100 != 0 or self.year % 400 == 0);
     }
-
-    /// Sum up all the digits in the date
-    /// e.g. 06/27/1998 -> 6 + 2 + 7 + 1 + 9 + 9 + 8
-    /// Can sum any date up to year 100,000,000
-    pub fn sumDigits(self: Self) u32 {
-        return sumDigitsRecursive(self.year, 10000000) + sumDigitsRecursive(self.month, 10) + sumDigitsRecursive(self.day, 10);
-    }
 };
-
-/// Sum digits in a base-10 number; an initial power of 10 divisor must be provided.
-/// The divisor is used to deconstruct number e.g.:
-///     number = 1956
-///     divisor = 1000
-///     number / divisor = 1 (int division)
-/// This implementation uses recursion to divide the divisor by 10 at each step.
-inline fn sumDigitsRecursive(number: u32, divisor: u32) u32 {
-    if (divisor == 1) {
-        return number;
-    }
-    return (number / divisor) + sumDigitsRecursive(number % divisor, divisor / 10);
-}
 
 /// Takes a date input in the form "mm/dd/yyyy" and returns a Date object
 /// "mm/dd/yyyy" format is not strict i.e.
@@ -118,22 +98,6 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
 //---------------------------------------------------------------------------------------------------------------------
 
 // TESTING
-// sumDigitsRecursive
-test "sumDigitsRecursive 1 digit" {
-    try std.testing.expectEqual(9, sumDigitsRecursive(9, 1));
-}
-test "sumDigitsRecursive 2 digit" {
-    try std.testing.expectEqual(6, sumDigitsRecursive(15, 10));
-}
-test "sumDigitsRecursive 3 digit" {
-    try std.testing.expectEqual(16, sumDigitsRecursive(286, 100));
-}
-test "sumDigitsRecursive 4 digit" {
-    try std.testing.expectEqual(25, sumDigitsRecursive(1996, 1000));
-}
-test "sumDigitsRecursive 8 digit" {
-    try std.testing.expectEqual(38, sumDigitsRecursive(19870526, 1e7));
-}
 // Date isLeapYear
 test "Date isLeapYear divisible by 4 (true)" {
     const date = Date{ .year = 2024, .month = 8, .day = 5 };
@@ -212,23 +176,6 @@ test "Date increment year" {
     try std.testing.expect(date.year == 1951 and date.month == 1 and date.day == 1);
 }
 
-// Date sumDigits
-test "Date sumDigits 12/31/1950" {
-    const date = Date{
-        .year = 1950,
-        .month = 12,
-        .day = 31,
-    };
-    try std.testing.expectEqual(22, date.sumDigits());
-}
-test "Date sumDigits 08/21/1996" {
-    const date = Date{
-        .year = 1996,
-        .month = 8,
-        .day = 21,
-    };
-    try std.testing.expectEqual(36, date.sumDigits());
-}
 // parseDate
 test "parseDate 1" {
     const allocator = std.testing.allocator;
