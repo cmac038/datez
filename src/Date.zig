@@ -126,6 +126,45 @@ pub const Date = union(enum) {
         }
     }
 
+    /// Create a date from int values
+    /// Returns LiteDate if year < 65535, BigDate otherwise
+    pub fn create(year: u128, month: u4, day: u5) !Date {
+        const lite_year: u16 =
+            if (year < U16_MAX_VALUE)
+                @intCast(year)
+            else
+                @intCast(year % U16_MAX_VALUE);
+        if (day > epoch.getDaysInMonth(lite_year, @enumFromInt(month))) {
+            return error.DayTooBig;
+        }
+        const lite_date: LiteDate = .{
+            .year = lite_year,
+            .month_day = .{ .month = @enumFromInt(month), .day_index = @intCast(day) },
+        };
+        if (year < U16_MAX_VALUE) {
+            return .{ .lite_date = lite_date };
+        }
+        return .{ .big_date = .{
+            .year_rollover = @intCast(year / U16_MAX_VALUE),
+            .lite_date = lite_date,
+        } };
+    }
+
+    /// Get today's date; will always be a LiteDate
+    /// Will need to be updated to also use BigDate in 65535 AD
+    pub fn today() Date {
+        const epoch_seconds: epoch.EpochSeconds = .{
+            .secs = @abs(std.time.timestamp()),
+        };
+        const year_day = epoch_seconds.getEpochDay().calculateYearDay();
+        var today_date: Date = .{ .lite_date = .{
+            .year = year_day.year,
+            .month_day = year_day.calculateMonthDay(),
+        } };
+        today_date.increment(); // off by one for some reason???
+        return today_date;
+    }
+
     /// Read out contents of Date object for debugging
     fn dump(this: Self) void {
         switch (this) {
@@ -175,11 +214,11 @@ pub const Date = union(enum) {
 ///     mmmmm/dddddd/yyyyyy is valid but ontologically incorrect
 ///     Any length for any part of the date is valid - it is the order that matters
 pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
-    var date_breakdown = try ArrayList(u64).initCapacity(allocator, 3);
+    var date_breakdown = try ArrayList(u128).initCapacity(allocator, 3);
     defer date_breakdown.deinit();
     var it = std.mem.tokenizeScalar(u8, input, '/');
     while (it.next()) |date_frag| {
-        const parsed_date_frag: u64 = try std.fmt.parseUnsigned(u64, date_frag, 10);
+        const parsed_date_frag: u128 = try std.fmt.parseUnsigned(u128, date_frag, 10);
         try date_breakdown.append(parsed_date_frag);
     }
     if (date_breakdown.items.len != 3) {
@@ -188,29 +227,12 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
     if (date_breakdown.items[0] > 12) {
         return error.MonthTooBig;
     }
-    const true_year = date_breakdown.items[2];
-    const month: epoch.Month = @enumFromInt(date_breakdown.items[0]);
-    const lite_year: u16 =
-        if (true_year < U16_MAX_VALUE)
-            @intCast(true_year)
-        else
-            @intCast(true_year % U16_MAX_VALUE);
-
-    if (date_breakdown.items[1] > epoch.getDaysInMonth(lite_year, month)) {
+    if (date_breakdown.items[1] > 31) {
         return error.DayTooBig;
     }
-    const lite_date: LiteDate = .{
-        .year = lite_year,
-        .month_day = .{ .month = month, .day_index = @intCast(date_breakdown.items[1]) },
-    };
-    const rollover = true_year / U16_MAX_VALUE;
-    if (true_year >= U16_MAX_VALUE) {
-        return Date{ .big_date = .{
-            .year_rollover = @intCast(rollover),
-            .lite_date = lite_date,
-        } };
-    }
-    return Date{ .lite_date = lite_date };
+    const day: u5 = @intCast(date_breakdown.items[1]);
+    const month: u4 = @intCast(date_breakdown.items[0]);
+    return try Date.create(date_breakdown.items[2], month, day);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
@@ -424,7 +446,14 @@ test "Date rollover 2" {
 test "Date rollover 3" {
     const allocator = std.testing.allocator;
     var parsed_date = try parseDate(allocator, "12/31/65535");
+    try std.testing.expect(@TypeOf(parsed_date.lite_date) == LiteDate);
     parsed_date.dump();
     parsed_date.increment();
+    try std.testing.expect(@TypeOf(parsed_date.big_date) == BigDate);
     parsed_date.dump();
+}
+
+// Date today
+test "Date today" {
+    print("[today_test] {f}\n", .{Date.today()});
 }
