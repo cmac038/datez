@@ -68,7 +68,7 @@ pub const BigDate = struct {
         try writer.print("{d:0>2}/{d:0>2}/{d}", .{
             this.lite_date.month_day.month.numeric(),
             this.lite_date.month_day.day_index,
-            this.lite_date.year + (this.year_rollover * U16_MAX_VALUE),
+            this.getTrueYear(),
         });
     }
 
@@ -84,6 +84,10 @@ pub const BigDate = struct {
             return;
         }
         this.lite_date.increment() catch unreachable;
+    }
+
+    pub fn getTrueYear(this: Self) u128 {
+        return this.lite_date.year + (this.year_rollover * U16_MAX_VALUE);
     }
 };
 
@@ -377,6 +381,18 @@ test "parseDate 11 (DayTooBig error)" {
 test "parseDate 12 (Leap Year DayTooBig error)" {
     const allocator = std.testing.allocator;
     try std.testing.expectError(error.DayTooBig, parseDate(allocator, "02/29/2025"));
+}
+
+// BigDate getTrueYear
+test "BigDate getTrueYear 1" {
+    const allocator = std.testing.allocator;
+    const parsed_date = try parseDate(allocator, "10/7/9294967296");
+    try std.testing.expectEqual(9294967296, parsed_date.big_date.getTrueYear());
+}
+test "BigDate getTrueYear 2" {
+    const allocator = std.testing.allocator;
+    var parsed_date = try parseDate(allocator, "12/31/131071");
+    try std.testing.expectEqual(131071, parsed_date.big_date.getTrueYear());
 }
 
 // Date rollover
