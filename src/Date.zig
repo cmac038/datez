@@ -128,7 +128,11 @@ pub const Date = union(enum) {
 
     /// Create a date from int values
     /// Returns LiteDate if year < 65535, BigDate otherwise
-    pub fn create(year: u128, month: u4, day: u5) !Date {
+    /// Returns errors if month or day is too big
+    pub fn fromInts(year: u128, month: u4, day: u5) !Date {
+        if (month > 12) {
+            return error.MonthTooBig;
+        }
         const lite_year: u16 =
             if (year < U16_MAX_VALUE)
                 @intCast(year)
@@ -232,7 +236,7 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
     }
     const day: u5 = @intCast(date_breakdown.items[1]);
     const month: u4 = @intCast(date_breakdown.items[0]);
-    return try Date.create(date_breakdown.items[2], month, day);
+    return try Date.fromInts(date_breakdown.items[2], month, day);
 }
 
 //---------------------------------------------------------------------------------------------------------------------
