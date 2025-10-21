@@ -14,84 +14,11 @@ const MAX_LITE_DATE: LiteDate = .{
     },
 };
 
-/// Lightweight Date, max year = 66535
-pub const LiteDate = struct {
-    const Self = @This();
+/// Date comparison stored as a 2-bit signed int.
+/// -1 = before, 0 = equal, 1 = after
+pub const DateComparison = enum(i2) { before = -1, equal = 0, after = 1 };
 
-    year: epoch.Year,
-    month_day: epoch.MonthAndDay,
-
-    /// Output takes the format mm/dd/yyyy
-    pub fn format(this: Self, writer: *Writer) Writer.Error!void {
-        try writer.print("{d:0>2}/{d:0>2}/{d}", .{
-            this.month_day.month.numeric(),
-            this.month_day.day_index,
-            this.year,
-        });
-    }
-
-    /// Increment by one day, handling month and year turnovers
-    /// Also handles leap years
-    pub fn increment(this: *Self) !void {
-        if (std.meta.eql(this.*, MAX_LITE_DATE)) {
-            return error.LiteDateOverflow;
-        }
-        // year turnaround
-        if (this.month_day.month == .dec and this.month_day.day_index == 31) {
-            this.year += 1;
-            this.month_day.month = .jan;
-            this.month_day.day_index = 1;
-            return;
-        }
-
-        // month turnaround
-        const days_in_month = epoch.getDaysInMonth(this.year, this.month_day.month);
-        if (this.month_day.day_index == days_in_month) {
-            const next_month: u4 = this.month_day.month.numeric() + 1;
-            this.month_day.month = @enumFromInt(next_month);
-            this.month_day.day_index = 1;
-            return;
-        }
-        this.month_day.day_index += 1;
-    }
-};
-
-/// Heavier Date with year rollover, max year = ???
-pub const BigDate = struct {
-    const Self = @This();
-
-    lite_date: LiteDate,
-    year_rollover: u64,
-
-    /// Output takes the format mm/dd/yyyy
-    pub fn format(this: Self, writer: *Writer) Writer.Error!void {
-        try writer.print("{d:0>2}/{d:0>2}/{d}", .{
-            this.lite_date.month_day.month.numeric(),
-            this.lite_date.month_day.day_index,
-            this.getTrueYear(),
-        });
-    }
-
-    /// Increment by one day, handling month and year turnovers
-    /// Also handles leap years
-    /// Should never fail
-    pub fn increment(this: *Self) void {
-        if (std.meta.eql(this.lite_date, MAX_LITE_DATE)) {
-            this.lite_date.year = 0;
-            this.lite_date.month_day.month = .jan;
-            this.lite_date.month_day.day_index = 1;
-            this.year_rollover += 1;
-            return;
-        }
-        this.lite_date.increment() catch unreachable;
-    }
-
-    pub fn getTrueYear(this: Self) u128 {
-        return this.lite_date.year + (this.year_rollover * U16_MAX_VALUE);
-    }
-};
-
-/// Date union to allow agnostic operations
+/// Date union, either LiteDate (year < 65536) or BigDate for bigger years.
 /// Can be used directly, or extract the inner object for less memory usage.
 pub const Date = union(enum) {
     const Self = @This();
@@ -123,6 +50,38 @@ pub const Date = union(enum) {
                 };
             },
             .big_date => |*date| date.increment(),
+        }
+    }
+
+    /// Compare two Date unions, accounting for all possible values.
+    /// Returns DateComparison enum(i2):
+    ///   DateComparison.before = -1
+    ///   DateComparison.equal = 0
+    ///   DateComparison.after = 1
+    pub fn compare(this: Self, other: Self) DateComparison {
+        switch (this) {
+            .lite_date => |this_lite_date| {
+                switch (other) {
+                    .lite_date => |other_lite_date| {
+                        return this_lite_date.compare(other_lite_date);
+                    },
+                    .big_date => |other_big_date| {
+                        if (other_big_date.year_rollover != 0) return .before;
+                        return this_lite_date.compare(other_big_date.lite_date);
+                    },
+                }
+            },
+            .big_date => |this_big_date| {
+                switch (other) {
+                    .lite_date => |other_lite_date| {
+                        if (this_big_date.year_rollover != 0) return .after;
+                        return this_big_date.lite_date.compare(other_lite_date);
+                    },
+                    .big_date => |other_big_date| {
+                        return this_big_date.compare(other_big_date);
+                    },
+                }
+            },
         }
     }
 
@@ -180,6 +139,7 @@ pub const Date = union(enum) {
                     \\  month: {d}
                     \\  day: {d}
                     \\
+                    \\
                 , .{
                     this,
                     date.year,
@@ -196,6 +156,7 @@ pub const Date = union(enum) {
                     \\  month: {d}
                     \\  day: {d}
                     \\
+                    \\
                 , .{
                     this,
                     date.year_rollover,
@@ -205,6 +166,116 @@ pub const Date = union(enum) {
                 });
             },
         }
+    }
+};
+
+/// Lightweight Date, max year = 66535
+pub const LiteDate = struct {
+    const Self = @This();
+
+    year: epoch.Year,
+    month_day: epoch.MonthAndDay,
+
+    /// Output takes the format mm/dd/yyyy
+    pub fn format(this: Self, writer: *Writer) Writer.Error!void {
+        try writer.print("{d:0>2}/{d:0>2}/{d}", .{
+            this.month_day.month.numeric(),
+            this.month_day.day_index,
+            this.year,
+        });
+    }
+
+    /// Increment by one day, handling month and year turnovers
+    /// Also handles leap years
+    pub fn increment(this: *Self) !void {
+        if (std.meta.eql(this.*, MAX_LITE_DATE)) {
+            return error.LiteDateOverflow;
+        }
+        // year turnaround
+        if (this.month_day.month == .dec and this.month_day.day_index == 31) {
+            this.year += 1;
+            this.month_day.month = .jan;
+            this.month_day.day_index = 1;
+            return;
+        }
+
+        // month turnaround
+        const days_in_month = epoch.getDaysInMonth(this.year, this.month_day.month);
+        if (this.month_day.day_index == days_in_month) {
+            const next_month: u4 = this.month_day.month.numeric() + 1;
+            this.month_day.month = @enumFromInt(next_month);
+            this.month_day.day_index = 1;
+            return;
+        }
+        this.month_day.day_index += 1;
+    }
+
+    /// Compare two LiteDate structs
+    /// Returns DateComparison enum(i2):
+    ///   DateComparison.before = -1
+    ///   DateComparison.equal = 0
+    ///   DateComparison.after = 1
+    pub fn compare(this: Self, other: Self) DateComparison {
+        if (this.year < other.year) return .before;
+        if (this.year > other.year) return .after;
+        // Reach here -> years are equal
+        const this_month = @intFromEnum(this.month_day.month);
+        const other_month = @intFromEnum(other.month_day.month);
+        if (this_month < other_month) return .before;
+        if (this_month > other_month) return .after;
+        // Reach here -> months are equal
+        if (this.month_day.day_index < other.month_day.day_index) return .before;
+        if (this.month_day.day_index > other.month_day.day_index) return .after;
+        // Reach here -> days are equal
+        return .equal;
+    }
+};
+
+/// Heavier Date with year rollover, max year = ???
+pub const BigDate = struct {
+    const Self = @This();
+
+    lite_date: LiteDate,
+    year_rollover: u64,
+
+    /// Output takes the format mm/dd/yyyy
+    pub fn format(this: Self, writer: *Writer) Writer.Error!void {
+        try writer.print("{d:0>2}/{d:0>2}/{d}", .{
+            this.lite_date.month_day.month.numeric(),
+            this.lite_date.month_day.day_index,
+            this.getTrueYear(),
+        });
+    }
+
+    /// Increment by one day, handling month and year turnovers
+    /// Also handles leap years
+    /// Should never fail
+    pub fn increment(this: *Self) void {
+        if (std.meta.eql(this.lite_date, MAX_LITE_DATE)) {
+            this.lite_date.year = 0;
+            this.lite_date.month_day.month = .jan;
+            this.lite_date.month_day.day_index = 1;
+            this.year_rollover += 1;
+            return;
+        }
+        this.lite_date.increment() catch unreachable;
+    }
+
+    /// Compare two BigDate structs
+    /// Returns DateComparison enum(i2):
+    ///   DateComparison.before = -1
+    ///   DateComparison.equal = 0
+    ///   DateComparison.after = 1
+    pub fn compare(this: Self, other: Self) DateComparison {
+        if (this.year_rollover < other.year_rollover) return .before;
+        if (this.year_rollover > other.year_rollover) return .after;
+        // Reach here -> year rollovers are equal, just compare lite dates
+        return this.lite_date.compare(other.lite_date);
+    }
+
+    /// Combine rollover and inner LiteDate year to get the true year value
+    pub fn getTrueYear(this: Self) u128 {
+        return this.lite_date.year + (this.year_rollover * U16_MAX_VALUE);
     }
 };
 
@@ -322,7 +393,6 @@ test "Date increment year" {
         .lite_date = lite_date,
     };
     print("[print_test] {f}\n", .{date});
-    date.dump();
 }
 
 // Date equals
@@ -345,6 +415,11 @@ test "equals false (day)" {
     const date = Date{ .lite_date = .{ .year = 2023, .month_day = .{ .month = .jan, .day_index = 7 } } };
     const date2 = Date{ .lite_date = .{ .year = 2023, .month_day = .{ .month = .jan, .day_index = 31 } } };
     try std.testing.expect(!std.meta.eql(date, date2));
+}
+
+// Date today
+test "Date today" {
+    print("[today_test] {f}\n",.{Date.today()});
 }
 
 // parseDate
@@ -438,26 +513,130 @@ test "Date rollover 1" {
     };
     try std.testing.expectEqualDeep(normal_date, parsed_date.big_date.lite_date);
     try std.testing.expectEqualDeep(date_with_rollover, parsed_date.big_date);
+    print("\nDate rollover 1\n", .{});
     parsed_date.dump();
 }
 test "Date rollover 2" {
     const allocator = std.testing.allocator;
     var parsed_date = try parseDate(allocator, "12/31/131071");
+    print("Date rollover 2: pre-increment\n", .{});
     parsed_date.dump();
     parsed_date.increment();
+    print("Date rollover 2: post-increment\n", .{});
     parsed_date.dump();
 }
 test "Date rollover 3" {
     const allocator = std.testing.allocator;
     var parsed_date = try parseDate(allocator, "12/31/65535");
-    try std.testing.expect(@TypeOf(parsed_date.lite_date) == LiteDate);
+    print("Date rollover 3: pre-increment\n", .{});
     parsed_date.dump();
     parsed_date.increment();
-    try std.testing.expect(@TypeOf(parsed_date.big_date) == BigDate);
+    print("Date rollover 3: post-increment\n", .{});
     parsed_date.dump();
 }
 
-// Date today
-test "Date today" {
-    print("[today_test] {f}\n", .{Date.today()});
+// Date fromInts
+test "Date fromInts: LiteDate" {
+    const a = try Date.fromInts(2024, 5, 21);
+    try std.testing.expect(a.lite_date.year == 2024 and
+        a.lite_date.month_day.month == epoch.Month.may and
+        a.lite_date.month_day.day_index == 21);
+}
+test "Date fromInts: BigDate" {
+    const a = try Date.fromInts(65536, 5, 21);
+    try std.testing.expect(a.big_date.year_rollover == 1 and
+        a.big_date.lite_date.year == 0 and
+        a.big_date.lite_date.month_day.month == epoch.Month.may and
+        a.big_date.lite_date.month_day.day_index == 21);
+}
+
+// Date compare
+test "LiteDate compare: before 1" {
+    const a = try Date.fromInts(2024, 5, 21);
+    const b = try Date.fromInts(2025, 7, 12);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "LiteDate compare: before 2" {
+    const a = try Date.fromInts(2025, 5, 21);
+    const b = try Date.fromInts(2025, 7, 12);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "LiteDate compare: before 3" {
+    const a = try Date.fromInts(2025, 5, 12);
+    const b = try Date.fromInts(2025, 5, 21);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "LiteDate compare: after 1" {
+    const a = try Date.fromInts(1961, 2, 14);
+    const b = try Date.fromInts(1960, 11, 25);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "LiteDate compare: after 2" {
+    const a = try Date.fromInts(1961, 11, 25);
+    const b = try Date.fromInts(1961, 2, 14);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "LiteDate compare: after 3" {
+    const a = try Date.fromInts(1961, 11, 16);
+    const b = try Date.fromInts(1961, 11, 14);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "LiteDate compare: equal" {
+    const a = try Date.fromInts(1961, 11, 14);
+    const b = try Date.fromInts(1961, 11, 14);
+    try std.testing.expect(a.compare(b) == .equal);
+}
+test "BigDate compare: before 1" {
+    const a = try Date.fromInts(65536, 5, 21);
+    const b = try Date.fromInts(65537, 7, 12);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "BigDate compare: before 2" {
+    const a = try Date.fromInts(65536, 5, 21);
+    const b = try Date.fromInts(65536, 7, 12);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "BigDate compare: before 3" {
+    const a = try Date.fromInts(65536, 5, 12);
+    const b = try Date.fromInts(65536, 5, 21);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "BigDate compare: after 1" {
+    const a = try Date.fromInts(123456792, 2, 14);
+    const b = try Date.fromInts(123456789, 11, 25);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "BigDate compare: after 2" {
+    const a = try Date.fromInts(123456789, 11, 25);
+    const b = try Date.fromInts(123456789, 2, 14);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "BigDate compare: after 3" {
+    const a = try Date.fromInts(123456789, 11, 16);
+    const b = try Date.fromInts(123456789, 11, 14);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "BigDate compare: equal" {
+    const a = try Date.fromInts(1235813213456, 11, 14);
+    const b = try Date.fromInts(1235813213456, 11, 14);
+    try std.testing.expect(a.compare(b) == .equal);
+}
+test "LiteDate/BigDate compare: before" {
+    const a = try Date.fromInts(2025, 5, 21);
+    const b = try Date.fromInts(65537, 7, 12);
+    try std.testing.expect(a.compare(b) == .before);
+}
+test "LiteDate/BigDate compare: after" {
+    const a = try Date.fromInts(123456792, 2, 14);
+    const b = try Date.fromInts(2025, 11, 25);
+    try std.testing.expect(a.compare(b) == .after);
+}
+test "LiteDate/BigDate compare: equal" {
+    const a = try Date.fromInts(65535, 11, 14);
+    var b = try Date.fromInts(65536, 11, 14);
+    b.big_date.year_rollover = 0;
+    b.big_date.lite_date.year = 65535;
+    a.dump();
+    b.dump();
+    try std.testing.expect(a.compare(b) == .equal);
 }
