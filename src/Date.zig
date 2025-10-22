@@ -19,6 +19,17 @@ const MAX_BIG_DATE: BigDate = .{
     .lite_date = MAX_LITE_DATE,
     .year_rollover = U16_MAX_VALUE - 1,
 };
+const MIN_LITE_DATE: LiteDate = .{
+    .year = 0,
+    .month_day = .{
+        .month = .jan,
+        .day_index = 1,
+    },
+};
+const MIN_BIG_DATE: BigDate = .{
+    .lite_date = MAX_LITE_DATE,
+    .year_rollover = 0,
+};
 
 /// Date comparison stored as a 2-bit signed int.
 /// -1 = before, 0 = equal, 1 = after
@@ -59,6 +70,31 @@ pub const Date = union(enum) {
             },
             .big_date => |*big_date| try big_date.increment(),
         }
+    }
+
+    /// Util for incrementing more than once
+    pub fn incrementNTimes(this: *Self, n: usize) !void {
+        for (0..n) |_| try this.increment();
+    }
+
+    /// Decrement by one day, handling month and year turnovers
+    /// Also handles leap years
+    /// Converts BigDate to LiteDate if current date is the min BigDate
+    pub fn decrement(this: *Self) !void {
+        switch (this.*) {
+            .lite_date => |*lite_date| try lite_date.decrement(),
+            .big_date => |*big_date| {
+                try big_date.decrement();
+                if (big_date.compare(MIN_BIG_DATE) == .equal) {
+                    this.* = Date{ .lite_date = big_date.lite_date };
+                }
+            },
+        }
+    }
+
+    /// Util for decrementing more than once
+    pub fn decrementNTimes(this: *Self, n: usize) !void {
+        for (0..n) |_| try this.decrement();
     }
 
     /// Compare two Date unions, accounting for all possible values.
@@ -223,6 +259,40 @@ pub const LiteDate = struct {
         this.month_day.day_index += 1;
     }
 
+    /// Util for incrementing more than once
+    pub fn incrementNTimes(this: *Self, n: usize) !void {
+        for (0..n) |_| try this.increment();
+    }
+
+    /// Decrement by one day, handling month and year turnovers
+    /// Also handles leap years
+    /// Fails before allowing year to go negative
+    pub fn decrement(this: *Self) !void {
+        if (this.compare(MIN_LITE_DATE) == .equal) {
+            return error.DateUnderflow;
+        }
+        // year turnaround
+        if (this.month_day.month == .jan and this.month_day.day_index == 1) {
+            this.year -= 1;
+            this.month_day.month = .dec;
+            this.month_day.day_index = 31;
+            return;
+        }
+        // month turnaround
+        if (this.month_day.day_index == 1) {
+            const last_month: epoch.Month = @enumFromInt(this.month_day.month.numeric() - 1);
+            this.month_day.month = last_month;
+            this.month_day.day_index = epoch.getDaysInMonth(this.year, last_month);
+            return;
+        }
+        this.month_day.day_index -= 1;
+    }
+
+    /// Util for decrementing more than once
+    pub fn decrementNTimes(this: *Self, n: usize) !void {
+        for (0..n) |_| try this.decrement();
+    }
+
     /// Compare two LiteDate structs
     /// Returns DateComparison enum(i2):
     ///   DateComparison.before = -1
@@ -269,13 +339,36 @@ pub const BigDate = struct {
             return error.BigDateOverflow;
         }
         if (this.lite_date.compare(MAX_LITE_DATE) == .equal) {
-            this.lite_date.year = 0;
-            this.lite_date.month_day.month = .jan;
-            this.lite_date.month_day.day_index = 1;
+            this.lite_date = MIN_LITE_DATE;
             this.year_rollover += 1;
             return;
         }
         this.lite_date.increment() catch unreachable;
+    }
+
+    /// Util for incrementing more than once
+    pub fn incrementNTimes(this: *Self, n: usize) !void {
+        for (0..n) |_| try this.increment();
+    }
+
+    /// Decrement by one day, handling month and year turnovers
+    /// Also handles leap years
+    /// Fails before allowing year to go negative
+    pub fn decrement(this: *Self) !void {
+        if (this.year_rollover == 0 and this.lite_date.compare(MIN_LITE_DATE) == .equal) {
+            return error.DateUnderflow;
+        }
+        if (this.lite_date.compare(MIN_LITE_DATE) == .equal) {
+            this.lite_date = MAX_LITE_DATE;
+            this.year_rollover -= 1;
+            return;
+        }
+        try this.lite_date.decrement();
+    }
+
+    /// Util for decrementing more than once
+    pub fn decrementNTimes(this: *Self, n: usize) !void {
+        for (0..n) |_| try this.decrement();
     }
 
     /// Compare two BigDate structs
@@ -437,6 +530,214 @@ test "Date increment BigDateOverflow 2" {
     try testing.expectError(error.BigDateOverflow, date.increment());
 }
 
+// Date incrementNTimes
+test "Date incrementNTimes normal" {
+    var date: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .apr, .day_index = 1 },
+    } };
+    try date.incrementNTimes(20);
+    const date2: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .apr, .day_index = 21 },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+test "Date incrementNTimes month rollover" {
+    var date: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .apr, .day_index = 1 },
+    } };
+    try date.incrementNTimes(30);
+    const date2: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .may, .day_index = 1 },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+test "Date incrementNTimes year rollover" {
+    var date: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .dec, .day_index = 2 },
+    } };
+    try date.incrementNTimes(30);
+    const date2: Date = .{ .lite_date = .{
+        .year = 2026,
+        .month_day = .{ .month = .jan, .day_index = 1 },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+test "Date incrementNTimes LiteDate -> BigDate" {
+    var date: Date = .{ .lite_date = .{
+        .year = U16_MAX_VALUE - 1,
+        .month_day = .{ .month = .dec, .day_index = 2 },
+    } };
+    try date.incrementNTimes(30);
+    const date2: Date = .{ .big_date = .{
+        .year_rollover = 1,
+        .lite_date = .{
+            .year = 0,
+            .month_day = .{ .month = .jan, .day_index = 1 },
+        },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+
+// Date decrement
+test "Date decrement day" {
+    var lite_date = LiteDate{
+        .year = 1950,
+        .month_day = .{
+            .month = .nov,
+            .day_index = 9,
+        },
+    };
+    try lite_date.decrement();
+    try testing.expect(lite_date.year == 1950 and
+        lite_date.month_day.month == .nov and
+        lite_date.month_day.day_index == 8);
+    var date: Date = .{ .lite_date = lite_date };
+    print("[print_test] {f}\n", .{date});
+    try date.decrement();
+    print("[print_test] {f}\n", .{date});
+}
+test "Date decrement 30 day month" {
+    var lite_date = LiteDate{
+        .year = 1950,
+        .month_day = .{
+            .month = .dec,
+            .day_index = 1,
+        },
+    };
+    try lite_date.decrement();
+    try testing.expect(lite_date.year == 1950 and
+        lite_date.month_day.month == .nov and
+        lite_date.month_day.day_index == 30);
+    print("[print_test] {f}\n", .{Date{ .lite_date = lite_date }});
+}
+test "Date decrement 31 day month" {
+    var lite_date = LiteDate{
+        .year = 1950,
+        .month_day = .{
+            .month = .sep,
+            .day_index = 1,
+        },
+    };
+    try lite_date.decrement();
+    try testing.expect(lite_date.year == 1950 and
+        lite_date.month_day.month == .aug and
+        lite_date.month_day.day_index == 31);
+    print("[print_test] {f}\n", .{Date{ .lite_date = lite_date }});
+}
+test "Date decrement February (not Leap Year)" {
+    var lite_date = LiteDate{
+        .year = 1950,
+        .month_day = .{
+            .month = .mar,
+            .day_index = 1,
+        },
+    };
+    try lite_date.decrement();
+    try testing.expect(lite_date.year == 1950 and
+        lite_date.month_day.month == .feb and
+        lite_date.month_day.day_index == 28);
+    print("[print_test] {f}\n", .{Date{ .lite_date = lite_date }});
+}
+test "Date decrement February (Leap Year)" {
+    var lite_date = LiteDate{
+        .year = 2024,
+        .month_day = .{
+            .month = .mar,
+            .day_index = 1,
+        },
+    };
+    try lite_date.decrement();
+    try testing.expect(lite_date.year == 2024 and
+        lite_date.month_day.month == .feb and
+        lite_date.month_day.day_index == 29);
+    print("[print_test] {f}\n", .{Date{ .lite_date = lite_date }});
+}
+test "Date decrement year" {
+    var lite_date = LiteDate{
+        .year = 1950,
+        .month_day = .{
+            .month = .jan,
+            .day_index = 1,
+        },
+    };
+    try lite_date.decrement();
+    try testing.expect(lite_date.year == 1949 and
+        lite_date.month_day.month == .dec and
+        lite_date.month_day.day_index == 31);
+    const date: Date = .{ .lite_date = lite_date };
+    print("[print_test] {f}\n", .{date});
+}
+test "Date decrement LiteDateUnderflow" {
+    var lite_date = MIN_LITE_DATE;
+    try testing.expectError(error.DateUnderflow, lite_date.decrement());
+}
+test "Date decrement BigDateUnderflow" {
+    var big_date: BigDate = .{
+        .year_rollover = 0,
+        .lite_date = MIN_LITE_DATE,
+    };
+    try testing.expectError(error.DateUnderflow, big_date.decrement());
+}
+test "Date decrement BigDateUnderflow 2" {
+    var date: Date = .{ .big_date = .{
+        .year_rollover = 0,
+        .lite_date = MIN_LITE_DATE,
+    } };
+    try testing.expectError(error.DateUnderflow, date.decrement());
+}
+
+// Date decrementNTimes
+test "Date decrementNTimes normal" {
+    var date: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .apr, .day_index = 21 },
+    } };
+    try date.decrementNTimes(20);
+    const date2: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .apr, .day_index = 1 },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+test "Date decrementNTimes month rollover" {
+    var date: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .may, .day_index = 1 },
+    } };
+    try date.decrementNTimes(30);
+    const date2: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .apr, .day_index = 1 },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+test "Date decrementNTimes year rollover" {
+    var date: Date = .{ .lite_date = .{
+        .year = 2025,
+        .month_day = .{ .month = .jan, .day_index = 1 },
+    } };
+    try date.decrementNTimes(30);
+    const date2: Date = .{ .lite_date = .{
+        .year = 2024,
+        .month_day = .{ .month = .dec, .day_index = 2 },
+    } };
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+test "Date decrementNTimes BigDate -> LiteDate" {
+    var date: Date = .{ .big_date = MIN_BIG_DATE };
+    const date2: Date = .{ .lite_date = .{
+        .year = U16_MAX_VALUE - 1,
+        .month_day = .{ .month = .dec, .day_index = 1 },
+    } };
+    try date.decrementNTimes(30);
+    try testing.expectEqual(.equal, date.compare(date2));
+}
+
 // Date equals
 test "equals true" {
     const date = Date{ .lite_date = .{
@@ -447,7 +748,7 @@ test "equals true" {
         .year = 2023,
         .month_day = .{ .month = .jan, .day_index = 7 },
     } };
-    try testing.expectEqual(date.compare(date2), .equal);
+    try testing.expectEqual(.equal, date.compare(date2));
 }
 test "equals false (year)" {
     const date = Date{ .lite_date = .{
@@ -458,7 +759,7 @@ test "equals false (year)" {
         .year = 2024,
         .month_day = .{ .month = .jan, .day_index = 7 },
     } };
-    try testing.expectEqual(date.compare(date2), .before);
+    try testing.expectEqual(.before, date.compare(date2));
 }
 test "equals false (month)" {
     const date = Date{ .lite_date = .{
@@ -469,7 +770,7 @@ test "equals false (month)" {
         .year = 2023,
         .month_day = .{ .month = .aug, .day_index = 7 },
     } };
-    try testing.expectEqual(date2.compare(date), .after);
+    try testing.expectEqual(.after, date2.compare(date));
 }
 test "equals false (day)" {
     const date = Date{
@@ -484,7 +785,7 @@ test "equals false (day)" {
             .month_day = .{ .month = .jan, .day_index = 31 },
         },
     };
-    try testing.expectEqual(date.compare(date2), .before);
+    try testing.expectEqual(.before, date.compare(date2));
 }
 
 // Date today
