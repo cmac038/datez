@@ -52,11 +52,35 @@ pub const Date = union(enum) {
         }
     }
 
+    /// Get year without needing to know if Date is Lite or Big
+    pub fn getYear(this: Self) u32 {
+        switch (this) {
+            .lite_date => |lite_date| return lite_date.year,
+            .big_date => |big_date| return big_date.getTrueYear(),
+        }
+    }
+
+    /// Get month without needing to know if Date is Lite or Big
+    pub fn getMonth(this: Self) u4 {
+        month: switch (this) {
+            .lite_date => |lite_date| return lite_date.month_day.month.numeric(),
+            .big_date => |big_date| continue :month Date{ .lite_date = big_date.lite_date },
+        }
+    }
+
+    /// Get day without needing to know if Date is Lite or Big
+    pub fn getDay(this: Self) u5 {
+        day: switch (this) {
+            .lite_date => |lite_date| return lite_date.month_day.day_index,
+            .big_date => |big_date| continue :day Date{ .lite_date = big_date.lite_date },
+        }
+    }
+
     /// Increment by one day, handling month and year turnovers
     /// Also handles leap years
     /// Converts LiteDate to BigDate if current date is the max LiteDate
     pub fn increment(this: *Self) !void {
-        ds: switch (this.*) {
+        inc: switch (this.*) {
             .lite_date => |*lite_date| {
                 lite_date.increment() catch {
                     this.* = Date{
@@ -65,7 +89,7 @@ pub const Date = union(enum) {
                             .lite_date = lite_date.*,
                         },
                     };
-                    continue :ds this.*;
+                    continue :inc this.*;
                 };
             },
             .big_date => |*big_date| try big_date.increment(),
@@ -133,10 +157,7 @@ pub const Date = union(enum) {
     /// Returns LiteDate if year < 65535
     /// Returns BigDate if year > 65535 and year < 4_294_967_295
     /// Returns errors if month, day, or year is too big
-    pub fn fromInts(year: u128, month: u4, day: u5) !Date {
-        if (year > MAX_YEAR) {
-            return error.YearTooBig;
-        }
+    pub fn fromInts(year: u32, month: u4, day: u5) !Date {
         if (month > 12) {
             return error.MonthTooBig;
         }
@@ -179,41 +200,22 @@ pub const Date = union(enum) {
     /// Read out contents of Date object for debugging
     fn dump(this: Self) void {
         switch (this) {
-            .lite_date => |lite_date| {
-                print(
-                    \\[LiteDate dump]
-                    \\  full: {f}
-                    \\  year: {d}
-                    \\  month: {d}
-                    \\  day: {d}
-                    \\
-                    \\
-                , .{
-                    this,
-                    lite_date.year,
-                    lite_date.month_day.month,
-                    lite_date.month_day.day_index,
-                });
-            },
-            .big_date => |big_date| {
-                print(
-                    \\[BigDate dump]
-                    \\  full: {f}
-                    \\  rollover: {d}
-                    \\  year: {d}
-                    \\  month: {d}
-                    \\  day: {d}
-                    \\
-                    \\
-                , .{
-                    this,
-                    big_date.year_rollover,
-                    big_date.lite_date.year,
-                    big_date.lite_date.month_day.month,
-                    big_date.lite_date.month_day.day_index,
-                });
-            },
+            .lite_date => print("[LiteDate dump]\n", .{}),
+            .big_date => |big_date| print("[BigDate dump]\n  rollover: {d}\n", .{big_date.year_rollover}),
         }
+        print(
+            \\  full: {f}
+            \\  year: {d}
+            \\  month: {d}
+            \\  day: {d}
+            \\
+            \\
+        , .{
+            this,
+            this.getYear(),
+            this.getMonth(),
+            this.getDay(),
+        });
     }
 };
 
@@ -384,7 +386,7 @@ pub const BigDate = struct {
     }
 
     /// Combine rollover and inner LiteDate year to get the true year value
-    pub fn getTrueYear(this: Self) u128 {
+    pub fn getTrueYear(this: Self) u32 {
         return this.lite_date.year + (this.year_rollover * U16_MAX_VALUE);
     }
 };
@@ -399,11 +401,11 @@ pub const BigDate = struct {
 ///     mmmmm/dddddd/yyyyyy is valid but ontologically incorrect
 ///     Any length for any part of the date is valid - it is the order that matters
 pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
-    var date_breakdown = try ArrayList(u128).initCapacity(allocator, 3);
+    var date_breakdown = try ArrayList(u32).initCapacity(allocator, 3);
     defer date_breakdown.deinit();
     var it = std.mem.tokenizeScalar(u8, input, '/');
     while (it.next()) |date_frag| {
-        const parsed_date_frag: u128 = try std.fmt.parseUnsigned(u128, date_frag, 10);
+        const parsed_date_frag: u32 = try std.fmt.parseUnsigned(u32, date_frag, 10);
         try date_breakdown.append(parsed_date_frag);
     }
     if (date_breakdown.items.len != 3) {
@@ -420,9 +422,9 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
     return try Date.fromInts(date_breakdown.items[2], month, day);
 }
 
-//---------------------------------------------------------------------------------------
-//---------------------------------------------------------------------------------------
-//---------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
+//--------------------------------------------------------------------------------------
 
 // TESTING
 const testing = std.testing;
@@ -872,9 +874,9 @@ test "parseDate 12 (Leap Year DayTooBig error)" {
     const allocator = testing.allocator;
     try testing.expectError(error.DayTooBig, parseDate(allocator, "02/29/2025"));
 }
-test "parseDate 13 (YearTooBig error)" {
+test "parseDate 13 (Overflow error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.YearTooBig, parseDate(allocator, "2/2/4294967296"));
+    try testing.expectError(error.Overflow, parseDate(allocator, "2/2/4294967296"));
 }
 
 // BigDate getTrueYear
@@ -947,9 +949,6 @@ test "Date fromInts: error.MonthTooBig" {
 }
 test "Date fromInts: error.DayTooBig" {
     try testing.expectError(error.DayTooBig, Date.fromInts(2025, 2, 31));
-}
-test "Date fromInts: error.YearTooBig" {
-    try testing.expectError(error.YearTooBig, Date.fromInts(MAX_YEAR + 1, 2, 20));
 }
 
 // Date compare
