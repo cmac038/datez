@@ -236,7 +236,7 @@ pub const BigDate = struct {
     const Self = @This();
 
     lite_date: LiteDate,
-    year_rollover: u64,
+    year_rollover: u32,
 
     /// Output takes the format mm/dd/yyyy
     pub fn format(this: Self, writer: *Writer) Writer.Error!void {
@@ -639,4 +639,10 @@ test "LiteDate/BigDate compare: equal" {
     a.dump();
     b.dump();
     try std.testing.expect(a.compare(b) == .equal);
+}
+
+test "sizeof" {
+    print("size of Date: {d} bytes == {d} bits\n", .{@sizeOf(Date), @bitSizeOf(Date)});
+    print("size of LiteDate: {d} bytes == {d} bits\n", .{@sizeOf(LiteDate), @bitSizeOf(LiteDate)});
+    print("size of BigDate: {d} bytes == {d} bits\n", .{@sizeOf(BigDate), @bitSizeOf(BigDate)});
 }
