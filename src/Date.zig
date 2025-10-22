@@ -253,8 +253,7 @@ pub const LiteDate = struct {
         // month turnaround
         const days_in_month = epoch.getDaysInMonth(this.year, this.month_day.month);
         if (this.month_day.day_index == days_in_month) {
-            const next_month: u4 = this.month_day.month.numeric() + 1;
-            this.month_day.month = @enumFromInt(next_month);
+            this.month_day.month = @enumFromInt(this.month_day.month.numeric() + 1);
             this.month_day.day_index = 1;
             return;
         }
