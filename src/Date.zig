@@ -31,12 +31,43 @@ const MIN_BIG_DATE: BigDate = .{
     .year_rollover = 0,
 };
 
+/// Occurs when a Date is incremented above the max value.
+pub const OverflowError = error{
+    /// LiteDate max year = 65,535.
+    LiteDateOverflow,
+    /// BigDate max year = 4,294,967,295.
+    BigDateOverflow,
+};
+/// Occurs when a Date is decremented below the max value.
+pub const UnderflowError = error{
+    /// Min year = 0
+    DateUnderflow,
+};
+/// Occurs when Date input is invalid.
+pub const InputError = error{
+    /// Must be in mm/dd/yyyy or similar format.
+    InvalidDateFormat,
+    /// Max year = 4,294,967,295.
+    YearTooBig,
+    /// Max month = 12.
+    MonthTooBig,
+    /// Max day = 31, 30, or 28 (depends on month).
+    DayTooBig,
+};
+
 /// Date comparison stored as a 2-bit signed int.
-/// -1 = before, 0 = equal, 1 = after
+/// * before = -1
+/// * equal = 0
+/// * after = 1
 pub const DateComparison = enum(i2) { before = -1, equal = 0, after = 1 };
 
-/// Date union, either LiteDate (year < 65536) or BigDate for bigger years.
+/// Date union, either LiteDate or BigDate.
+///
+/// LiteDate is used for years 0 - 65,535.
+/// BigDate is used for years 65,536 - 4,294,967,295.
+///
 /// Can be used directly, or extract the inner object for less memory usage.
+///
 /// Size: 8 bytes
 pub const Date = union(enum) {
     const Self = @This();
@@ -44,7 +75,7 @@ pub const Date = union(enum) {
     lite_date: LiteDate,
     big_date: BigDate,
 
-    /// Output takes the format mm/dd/yyyy
+    /// Output takes the format mm/dd/yyyy.
     pub fn format(this: Self, writer: *Writer) Writer.Error!void {
         switch (this) {
             .lite_date => |lite_date| try writer.print("{f}", .{lite_date}),
@@ -52,7 +83,7 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Get year without needing to know if Date is Lite or Big
+    /// Get year without needing to know if Date is Lite or Big.
     pub fn getYear(this: Self) u32 {
         switch (this) {
             .lite_date => |lite_date| return lite_date.year,
@@ -60,7 +91,7 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Get month without needing to know if Date is Lite or Big
+    /// Get month without needing to know if Date is Lite or Big.
     pub fn getMonth(this: Self) u4 {
         month: switch (this) {
             .lite_date => |lite_date| return lite_date.month_day.month.numeric(),
@@ -68,7 +99,7 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Get day without needing to know if Date is Lite or Big
+    /// Get day without needing to know if Date is Lite or Big.
     pub fn getDay(this: Self) u5 {
         day: switch (this) {
             .lite_date => |lite_date| return lite_date.month_day.day_index,
@@ -76,10 +107,11 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Increment by one day, handling month and year turnovers
-    /// Also handles leap years
-    /// Converts LiteDate to BigDate if current date is the max LiteDate
-    pub fn increment(this: *Self) !void {
+    /// Increment by one day, handling month and year turnovers (handles leap years).
+    ///
+    /// Converts LiteDate to BigDate if current date is the max LiteDate.
+    /// Fails before allowing year to go beyond 4,294,967,295
+    pub fn increment(this: *Self) OverflowError!void {
         inc: switch (this.*) {
             .lite_date => |*lite_date| {
                 lite_date.increment() catch {
@@ -96,15 +128,17 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Util for incrementing more than once
-    pub fn incrementNTimes(this: *Self, n: usize) !void {
+    /// Util for incrementing more than once.
+    /// Fails before allowing year to go beyond 4,294,967,295
+    pub fn incrementNTimes(this: *Self, n: usize) OverflowError!void {
         for (0..n) |_| try this.increment();
     }
 
-    /// Decrement by one day, handling month and year turnovers
-    /// Also handles leap years
-    /// Converts BigDate to LiteDate if current date is the min BigDate
-    pub fn decrement(this: *Self) !void {
+    /// Decrement by one day, handling month and year turnovers (handles leap years).
+    ///
+    /// Converts BigDate to LiteDate if current date is the min BigDate.
+    /// Fails before allowing year to go negative.
+    pub fn decrement(this: *Self) UnderflowError!void {
         switch (this.*) {
             .lite_date => |*lite_date| try lite_date.decrement(),
             .big_date => |*big_date| {
@@ -116,16 +150,18 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Util for decrementing more than once
-    pub fn decrementNTimes(this: *Self, n: usize) !void {
+    /// Util for decrementing more than once.
+    /// Fails before allowing year to go negative.
+    pub fn decrementNTimes(this: *Self, n: usize) UnderflowError!void {
         for (0..n) |_| try this.decrement();
     }
 
     /// Compare two Date unions, accounting for all possible values.
+    ///
     /// Returns DateComparison enum(i2):
-    ///   DateComparison.before = -1
-    ///   DateComparison.equal = 0
-    ///   DateComparison.after = 1
+    /// * DateComparison.before = -1
+    /// * DateComparison.equal = 0
+    /// * DateComparison.after = 1
     pub fn compare(this: Self, other: Self) DateComparison {
         switch (this) {
             .lite_date => |lite_date| {
@@ -153,13 +189,13 @@ pub const Date = union(enum) {
         }
     }
 
-    /// Create a date from int values
-    /// Returns LiteDate if year < 65535
-    /// Returns BigDate if year > 65535 and year < 4_294_967_295
-    /// Returns errors if month, day, or year is too big
-    pub fn fromInts(year: u32, month: u4, day: u5) !Date {
+    /// Create a date from int values.
+    /// * Returns LiteDate if year < 65,535
+    /// * Returns BigDate if year > 65,535 and year < 4,294,967,295
+    /// * Returns errors if month, day, or year is too big
+    pub fn fromInts(year: u32, month: u4, day: u5) InputError!Date {
         if (month > 12) {
-            return error.MonthTooBig;
+            return InputError.MonthTooBig;
         }
         const lite_year: u16 =
             if (year < U16_MAX_VALUE)
@@ -167,7 +203,7 @@ pub const Date = union(enum) {
             else
                 @intCast(year % U16_MAX_VALUE);
         if (day > epoch.getDaysInMonth(lite_year, @enumFromInt(month))) {
-            return error.DayTooBig;
+            return InputError.DayTooBig;
         }
         const lite_date: LiteDate = .{
             .year = lite_year,
@@ -182,8 +218,8 @@ pub const Date = union(enum) {
         } };
     }
 
-    /// Get today's date; will always be a LiteDate
-    /// Will need to be updated to also use BigDate in 65535 AD
+    /// Get today's date; will always be a LiteDate.
+    /// Will need to be updated to also use BigDate in 65,535 AD.
     pub fn today() Date {
         const now: epoch.EpochSeconds = .{
             .secs = @abs(std.time.timestamp()),
@@ -197,7 +233,7 @@ pub const Date = union(enum) {
         return today_date;
     }
 
-    /// Read out contents of Date object for debugging
+    /// Read out contents of Date object for debugging.
     fn dump(this: Self) void {
         switch (this) {
             .lite_date => print("[LiteDate dump]\n", .{}),
@@ -219,8 +255,9 @@ pub const Date = union(enum) {
     }
 };
 
-/// Lightweight Date, max year = 66535.
+/// Lightweight Date, max year = 66,535. 
 /// Use this for most normal date-related logic.
+///
 /// Size: 4 bytes
 pub const LiteDate = struct {
     const Self = @This();
@@ -228,7 +265,7 @@ pub const LiteDate = struct {
     year: epoch.Year,
     month_day: epoch.MonthAndDay,
 
-    /// Output takes the format mm/dd/yyyy
+    /// Output takes the format mm/dd/yyyy.
     pub fn format(this: Self, writer: *Writer) Writer.Error!void {
         try writer.print("{d:0>2}/{d:0>2}/{d}", .{
             this.month_day.month.numeric(),
@@ -237,11 +274,11 @@ pub const LiteDate = struct {
         });
     }
 
-    /// Increment by one day, handling month and year turnovers
-    /// Also handles leap years
-    pub fn increment(this: *Self) !void {
+    /// Increment by one day, handling month and year turnovers (handles leap years).
+    /// Fails before allowing year to go beyond 65,535.
+    pub fn increment(this: *Self) OverflowError!void {
         if (this.compare(MAX_LITE_DATE) == .equal) {
-            return error.LiteDateOverflow;
+            return OverflowError.LiteDateOverflow;
         }
         // year turnaround
         if (this.month_day.month == .dec and this.month_day.day_index == 31) {
@@ -260,17 +297,17 @@ pub const LiteDate = struct {
         this.month_day.day_index += 1;
     }
 
-    /// Util for incrementing more than once
-    pub fn incrementNTimes(this: *Self, n: usize) !void {
+    /// Util for incrementing more than once.
+    /// Fails before allowing year to go beyond 65,535.
+    pub fn incrementNTimes(this: *Self, n: usize) OverflowError!void {
         for (0..n) |_| try this.increment();
     }
 
-    /// Decrement by one day, handling month and year turnovers
-    /// Also handles leap years
-    /// Fails before allowing year to go negative
-    pub fn decrement(this: *Self) !void {
+    /// Decrement by one day, handling month and year turnovers (handles leap years).
+    /// Fails before allowing year to go negative.
+    pub fn decrement(this: *Self) UnderflowError!void {
         if (this.compare(MIN_LITE_DATE) == .equal) {
-            return error.DateUnderflow;
+            return UnderflowError.DateUnderflow;
         }
         // year turnaround
         if (this.month_day.month == .jan and this.month_day.day_index == 1) {
@@ -289,16 +326,18 @@ pub const LiteDate = struct {
         this.month_day.day_index -= 1;
     }
 
-    /// Util for decrementing more than once
-    pub fn decrementNTimes(this: *Self, n: usize) !void {
+    /// Util for decrementing more than once.
+    /// Fails before allowing year to go negative.
+    pub fn decrementNTimes(this: *Self, n: usize) UnderflowError!void {
         for (0..n) |_| try this.decrement();
     }
 
-    /// Compare two LiteDate structs
+    /// Compare two LiteDate structs.
+    ///
     /// Returns DateComparison enum(i2):
-    ///   DateComparison.before = -1
-    ///   DateComparison.equal = 0
-    ///   DateComparison.after = 1
+    /// * DateComparison.before = -1
+    /// * DateComparison.equal = 0
+    /// * DateComparison.after = 1
     pub fn compare(this: Self, other: Self) DateComparison {
         if (this.year < other.year) return .before;
         if (this.year > other.year) return .after;
@@ -315,7 +354,8 @@ pub const LiteDate = struct {
     }
 };
 
-/// Heavier Date with year rollover, max year = 4,294,967,295
+/// Heavier Date with year rollover, max year = 4,294,967,295.
+///
 /// Size: 6 bytes
 pub const BigDate = struct {
     const Self = @This();
@@ -323,7 +363,7 @@ pub const BigDate = struct {
     lite_date: LiteDate,
     year_rollover: u16,
 
-    /// Output takes the format mm/dd/yyyy
+    /// Output takes the format mm/dd/yyyy.
     pub fn format(this: Self, writer: *Writer) Writer.Error!void {
         try writer.print("{d:0>2}/{d:0>2}/{d}", .{
             this.lite_date.month_day.month.numeric(),
@@ -332,12 +372,11 @@ pub const BigDate = struct {
         });
     }
 
-    /// Increment by one day, handling month and year turnovers
-    /// Also handles leap years
-    /// Only fails after year = 4_294_967_295
-    pub fn increment(this: *Self) !void {
+    /// Increment by one day, handling month and year turnovers (handles leap years).
+    /// Fails before allowing year to go beyond 4,294,967,295.
+    pub fn increment(this: *Self) OverflowError!void {
         if (this.compare(MAX_BIG_DATE) == .equal) {
-            return error.BigDateOverflow;
+            return OverflowError.BigDateOverflow;
         }
         if (this.lite_date.compare(MAX_LITE_DATE) == .equal) {
             this.lite_date = MIN_LITE_DATE;
@@ -347,17 +386,17 @@ pub const BigDate = struct {
         this.lite_date.increment() catch unreachable;
     }
 
-    /// Util for incrementing more than once
-    pub fn incrementNTimes(this: *Self, n: usize) !void {
+    /// Util for incrementing more than once.
+    /// Fails before allowing year to go beyond 4,294,967,295.
+    pub fn incrementNTimes(this: *Self, n: usize) OverflowError!void {
         for (0..n) |_| try this.increment();
     }
 
-    /// Decrement by one day, handling month and year turnovers
-    /// Also handles leap years
-    /// Fails before allowing year to go negative
-    pub fn decrement(this: *Self) !void {
+    /// Decrement by one day, handling month and year turnovers (handles leap years).
+    /// Fails before allowing year to go negative.
+    pub fn decrement(this: *Self) UnderflowError!void {
         if (this.year_rollover == 0 and this.lite_date.compare(MIN_LITE_DATE) == .equal) {
-            return error.DateUnderflow;
+            return UnderflowError.DateUnderflow;
         }
         if (this.lite_date.compare(MIN_LITE_DATE) == .equal) {
             this.lite_date = MAX_LITE_DATE;
@@ -367,16 +406,18 @@ pub const BigDate = struct {
         try this.lite_date.decrement();
     }
 
-    /// Util for decrementing more than once
-    pub fn decrementNTimes(this: *Self, n: usize) !void {
+    /// Util for decrementing more than once.
+    /// Fails before allowing year to go negative.
+    pub fn decrementNTimes(this: *Self, n: usize) UnderflowError!void {
         for (0..n) |_| try this.decrement();
     }
 
-    /// Compare two BigDate structs
+    /// Compare two BigDate structs.
+    ///
     /// Returns DateComparison enum(i2):
-    ///   DateComparison.before = -1
-    ///   DateComparison.equal = 0
-    ///   DateComparison.after = 1
+    /// * DateComparison.before = -1
+    /// * DateComparison.equal = 0
+    /// * DateComparison.after = 1
     pub fn compare(this: Self, other: Self) DateComparison {
         if (this.year_rollover < other.year_rollover) return .before;
         if (this.year_rollover > other.year_rollover) return .after;
@@ -384,21 +425,25 @@ pub const BigDate = struct {
         return this.lite_date.compare(other.lite_date);
     }
 
-    /// Combine rollover and inner LiteDate year to get the true year value
+    /// Combine rollover and inner LiteDate year to get the true year value.
     pub fn getTrueYear(this: Self) u32 {
         return this.lite_date.year + (this.year_rollover * U16_MAX_VALUE);
     }
 };
 
 /// Takes a date input in the form "mm/dd/yyyy" and returns a Date union.
-/// If year > 65535, a BigDate will be used.
+///
+/// If year > 65,535, a BigDate will be used.
 /// Otherwise, a LiteDate will be used.
+///
+/// Fails if format is wrong or day/month/year is out of scope.
+///
 /// "mm/dd/yyyy" format is not strict i.e.
-///     mm/dd/yy is valid; yy = 96 will be treated as year 96, not 1996
-///     m/d/y is valid
-///     mm/d/yyyy is valid
-///     mmmmm/dddddd/yyyyyy is valid but ontologically incorrect
-///     Any length for any part of the date is valid - it is the order that matters
+/// * mm/dd/yy is valid; yy = 96 will be treated as year 96, not 1996
+/// * m/d/y is valid
+/// * mm/d/yyyy is valid
+/// * mmmmm/dddddd/yyyyyy is valid but ontologically incorrect
+/// * Any length for any part of the date is valid - it is the order that matters
 pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
     var date_breakdown = try ArrayList(u32).initCapacity(allocator, 3);
     defer date_breakdown.deinit();
@@ -408,13 +453,13 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
         try date_breakdown.append(parsed_date_frag);
     }
     if (date_breakdown.items.len != 3) {
-        return error.InvalidDateFormat;
+        return InputError.InvalidDateFormat;
     }
     if (date_breakdown.items[0] > 12) {
-        return error.MonthTooBig;
+        return InputError.MonthTooBig;
     }
     if (date_breakdown.items[1] > 31) {
-        return error.DayTooBig;
+        return InputError.DayTooBig;
     }
     const day: u5 = @intCast(date_breakdown.items[1]);
     const month: u4 = @intCast(date_breakdown.items[0]);
@@ -520,15 +565,15 @@ test "Date increment year" {
 }
 test "Date increment LiteDateOverflow" {
     var lite_date = MAX_LITE_DATE;
-    try testing.expectError(error.LiteDateOverflow, lite_date.increment());
+    try testing.expectError(OverflowError.LiteDateOverflow, lite_date.increment());
 }
 test "Date increment BigDateOverflow" {
     var big_date = MAX_BIG_DATE;
-    try testing.expectError(error.BigDateOverflow, big_date.increment());
+    try testing.expectError(OverflowError.BigDateOverflow, big_date.increment());
 }
 test "Date increment BigDateOverflow 2" {
     var date: Date = .{ .big_date = MAX_BIG_DATE };
-    try testing.expectError(error.BigDateOverflow, date.increment());
+    try testing.expectError(OverflowError.BigDateOverflow, date.increment());
 }
 
 // Date incrementNTimes
@@ -673,23 +718,23 @@ test "Date decrement year" {
     const date: Date = .{ .lite_date = lite_date };
     print("[print_test] {f}\n", .{date});
 }
-test "Date decrement LiteDateUnderflow" {
+test "Date decrement LiteDate DateUnderflow" {
     var lite_date = MIN_LITE_DATE;
-    try testing.expectError(error.DateUnderflow, lite_date.decrement());
+    try testing.expectError(UnderflowError.DateUnderflow, lite_date.decrement());
 }
-test "Date decrement BigDateUnderflow" {
+test "Date decrement BigDate DateUnderflow" {
     var big_date: BigDate = .{
         .year_rollover = 0,
         .lite_date = MIN_LITE_DATE,
     };
-    try testing.expectError(error.DateUnderflow, big_date.decrement());
+    try testing.expectError(UnderflowError.DateUnderflow, big_date.decrement());
 }
-test "Date decrement BigDateUnderflow 2" {
+test "Date decrement BigDate DateUnderflow 2" {
     var date: Date = .{ .big_date = .{
         .year_rollover = 0,
         .lite_date = MIN_LITE_DATE,
     } };
-    try testing.expectError(error.DateUnderflow, date.decrement());
+    try testing.expectError(UnderflowError.DateUnderflow, date.decrement());
 }
 
 // Date decrementNTimes
@@ -851,27 +896,27 @@ test "parseDate 6 (Leap Year)" {
 }
 test "parseDate 7 (InvalidDateFormat error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.InvalidDateFormat, parseDate(allocator, "01/17"));
+    try testing.expectError(InputError.InvalidDateFormat, parseDate(allocator, "01/17"));
 }
 test "parseDate 8 (InvalidDateFormat error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.InvalidDateFormat, parseDate(allocator, "01/17"));
+    try testing.expectError(InputError.InvalidDateFormat, parseDate(allocator, "01/17"));
 }
 test "parseDate 9 (MonthTooBig error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.MonthTooBig, parseDate(allocator, "13/12/2025"));
+    try testing.expectError(InputError.MonthTooBig, parseDate(allocator, "13/12/2025"));
 }
 test "parseDate 10 (DayTooBig error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.DayTooBig, parseDate(allocator, "04/31/2025"));
+    try testing.expectError(InputError.DayTooBig, parseDate(allocator, "04/31/2025"));
 }
 test "parseDate 11 (DayTooBig error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.DayTooBig, parseDate(allocator, "09/32/2025"));
+    try testing.expectError(InputError.DayTooBig, parseDate(allocator, "09/32/2025"));
 }
 test "parseDate 12 (Leap Year DayTooBig error)" {
     const allocator = testing.allocator;
-    try testing.expectError(error.DayTooBig, parseDate(allocator, "02/29/2025"));
+    try testing.expectError(InputError.DayTooBig, parseDate(allocator, "02/29/2025"));
 }
 test "parseDate 13 (Overflow error)" {
     const allocator = testing.allocator;
@@ -943,11 +988,11 @@ test "Date fromInts: BigDate" {
         a.big_date.lite_date.month_day.month == epoch.Month.may and
         a.big_date.lite_date.month_day.day_index == 21);
 }
-test "Date fromInts: error.MonthTooBig" {
-    try testing.expectError(error.MonthTooBig, Date.fromInts(2025, 13, 21));
+test "Date fromInts: InputError.MonthTooBig" {
+    try testing.expectError(InputError.MonthTooBig, Date.fromInts(2025, 13, 21));
 }
-test "Date fromInts: error.DayTooBig" {
-    try testing.expectError(error.DayTooBig, Date.fromInts(2025, 2, 31));
+test "Date fromInts: DateError.DayTooBig" {
+    try testing.expectError(InputError.DayTooBig, Date.fromInts(2025, 2, 31));
 }
 
 // Date compare
