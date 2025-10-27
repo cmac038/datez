@@ -1,65 +1,4 @@
-const std = @import("std");
-const Writer = std.Io.Writer;
-const Allocator = std.mem.Allocator;
-const ArrayList = std.array_list.Managed;
-const print = std.debug.print;
-const epoch = std.time.epoch;
-
-// Constraints
-const U16_MAX_VALUE: u32 = 65536;
-const MAX_YEAR = 4_294_967_295;
-const MAX_LITE_DATE: LiteDate = .{
-    .year = U16_MAX_VALUE - 1,
-    .month_day = .{
-        .month = .dec,
-        .day_index = 31,
-    },
-};
-const MAX_BIG_DATE: BigDate = .{
-    .lite_date = MAX_LITE_DATE,
-    .year_rollover = U16_MAX_VALUE - 1,
-};
-const MIN_LITE_DATE: LiteDate = .{
-    .year = 0,
-    .month_day = .{
-        .month = .jan,
-        .day_index = 1,
-    },
-};
-const MIN_BIG_DATE: BigDate = .{
-    .lite_date = MAX_LITE_DATE,
-    .year_rollover = 0,
-};
-
-/// Occurs when a Date is incremented above the max value.
-pub const OverflowError = error{
-    /// LiteDate max year = 65,535.
-    LiteDateOverflow,
-    /// BigDate max year = 4,294,967,295.
-    BigDateOverflow,
-};
-/// Occurs when a Date is decremented below the max value.
-pub const UnderflowError = error{
-    /// Min year = 0
-    DateUnderflow,
-};
-/// Occurs when Date input is invalid.
-pub const InputError = error{
-    /// Must be in mm/dd/yyyy or similar format.
-    InvalidDateFormat,
-    /// Max year = 4,294,967,295.
-    YearTooBig,
-    /// Max month = 12.
-    MonthTooBig,
-    /// Max day = 31, 30, or 28 (depends on month).
-    DayTooBig,
-};
-
-/// Date comparison stored as a 2-bit signed int.
-/// * before = -1
-/// * equal = 0
-/// * after = 1
-pub const DateComparison = enum(i2) { before = -1, equal = 0, after = 1 };
+//! TODO: doc-level comments
 
 /// Date union, either LiteDate or BigDate.
 ///
@@ -465,6 +404,70 @@ pub fn parseDate(allocator: Allocator, input: []const u8) !Date {
     const month: u4 = @intCast(date_breakdown.items[0]);
     return try Date.fromInts(date_breakdown.items[2], month, day);
 }
+
+/// Date comparison stored as a 2-bit signed int.
+/// * before = -1
+/// * equal = 0
+/// * after = 1
+pub const DateComparison = enum(i2) { before = -1, equal = 0, after = 1 };
+
+/// Occurs when a Date is incremented above the max value.
+pub const OverflowError = error{
+    /// LiteDate max year = 65,535.
+    LiteDateOverflow,
+    /// BigDate max year = 4,294,967,295.
+    BigDateOverflow,
+};
+/// Occurs when a Date is decremented below the max value.
+pub const UnderflowError = error{
+    /// Min year = 0
+    DateUnderflow,
+};
+/// Occurs when Date input is invalid.
+pub const InputError = error{
+    /// Must be in mm/dd/yyyy or similar format.
+    InvalidDateFormat,
+    /// Max year = 4,294,967,295.
+    YearTooBig,
+    /// Max month = 12.
+    MonthTooBig,
+    /// Max day = 31, 30, or 28 (depends on month).
+    DayTooBig,
+};
+
+
+// Constraints
+const U16_MAX_VALUE: u32 = 65536;
+const MAX_YEAR = 4_294_967_295;
+const MAX_LITE_DATE: LiteDate = .{
+    .year = U16_MAX_VALUE - 1,
+    .month_day = .{
+        .month = .dec,
+        .day_index = 31,
+    },
+};
+const MAX_BIG_DATE: BigDate = .{
+    .lite_date = MAX_LITE_DATE,
+    .year_rollover = U16_MAX_VALUE - 1,
+};
+const MIN_LITE_DATE: LiteDate = .{
+    .year = 0,
+    .month_day = .{
+        .month = .jan,
+        .day_index = 1,
+    },
+};
+const MIN_BIG_DATE: BigDate = .{
+    .lite_date = MAX_LITE_DATE,
+    .year_rollover = 0,
+};
+
+const std = @import("std");
+const Writer = std.Io.Writer;
+const Allocator = std.mem.Allocator;
+const ArrayList = std.array_list.Managed;
+const print = std.debug.print;
+const epoch = std.time.epoch;
 
 //--------------------------------------------------------------------------------------
 //--------------------------------------------------------------------------------------
