@@ -1,4 +1,4 @@
-pub const Date = @import("Date.zig").Date;
-pub const LiteDate = @import("Date.zig").LiteDate;
-pub const BigDate = @import("Date.zig").BigDate;
-pub const parseDate = @import("Date.zig").parseDate;
+pub const Date = @import("datez.zig").Date;
+pub const LiteDate = @import("datez.zig").LiteDate;
+pub const BigDate = @import("datez.zig").BigDate;
+pub const parseDate = @import("datez.zig").parseDate;

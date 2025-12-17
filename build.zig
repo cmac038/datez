@@ -10,7 +10,7 @@ pub fn build(b: *std.Build) void {
 
     const date_tests = b.addTest(.{
         .root_module = b.createModule(.{
-            .root_source_file = b.path("src/Date.zig"),
+            .root_source_file = b.path("src/datez.zig"),
             .target = target,
         })
     });
