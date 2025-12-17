@@ -23,7 +23,7 @@ pub const Date = union(enum) {
     }
 
     /// Get year without needing to know if Date is Lite or Big.
-    pub fn getYear(this: Self) u32 {
+    pub fn year(this: Self) u32 {
         switch (this) {
             .lite_date => |lite_date| return lite_date.year,
             .big_date => |big_date| return big_date.getTrueYear(),
@@ -31,7 +31,7 @@ pub const Date = union(enum) {
     }
 
     /// Get month without needing to know if Date is Lite or Big.
-    pub fn getMonth(this: Self) u4 {
+    pub fn month(this: Self) u4 {
         month: switch (this) {
             .lite_date => |lite_date| return lite_date.month_day.month.numeric(),
             .big_date => |big_date| continue :month Date{ .lite_date = big_date.lite_date },
@@ -39,7 +39,7 @@ pub const Date = union(enum) {
     }
 
     /// Get day without needing to know if Date is Lite or Big.
-    pub fn getDay(this: Self) u5 {
+    pub fn day(this: Self) u5 {
         day: switch (this) {
             .lite_date => |lite_date| return lite_date.month_day.day_index,
             .big_date => |big_date| continue :day Date{ .lite_date = big_date.lite_date },
@@ -132,27 +132,27 @@ pub const Date = union(enum) {
     /// * Returns LiteDate if year < 65,535
     /// * Returns BigDate if year > 65,535 and year < 4,294,967,295
     /// * Returns errors if month, day, or year is too big
-    pub fn fromInts(year: u32, month: u4, day: u5) InputError!Date {
-        if (month > 12) {
+    pub fn fromInts(intYear: u32, intMonth: u4, intDay: u5) InputError!Date {
+        if (intMonth > 12) {
             return InputError.MonthTooBig;
         }
         const lite_year: u16 =
-            if (year < U16_MAX_VALUE)
-                @intCast(year)
+            if (intYear < U16_MAX_VALUE)
+                @intCast(intYear)
             else
-                @intCast(year % U16_MAX_VALUE);
-        if (day > epoch.getDaysInMonth(lite_year, @enumFromInt(month))) {
+                @intCast(intYear % U16_MAX_VALUE);
+        if (intDay > epoch.getDaysInMonth(lite_year, @enumFromInt(intMonth))) {
             return InputError.DayTooBig;
         }
         const lite_date: LiteDate = .{
             .year = lite_year,
-            .month_day = .{ .month = @enumFromInt(month), .day_index = @intCast(day) },
+            .month_day = .{ .month = @enumFromInt(intMonth), .day_index = @intCast(intDay) },
         };
-        if (year < U16_MAX_VALUE) {
+        if (intYear < U16_MAX_VALUE) {
             return .{ .lite_date = lite_date };
         }
         return .{ .big_date = .{
-            .year_rollover = @intCast(year / U16_MAX_VALUE),
+            .year_rollover = @intCast(intYear / U16_MAX_VALUE),
             .lite_date = lite_date,
         } };
     }
@@ -187,9 +187,9 @@ pub const Date = union(enum) {
             \\
         , .{
             this,
-            this.getYear(),
-            this.getMonth(),
-            this.getDay(),
+            this.year(),
+            this.month(),
+            this.day(),
         });
     }
 };
